@@ -148,7 +148,7 @@ sub make_run {
       my ($ip,$ms);
       TOKEN: foreach (split(/\s+/,$data)) {
         # store record, if found a timeout ('*') or error message
-        if (($_ eq '*')||(/^!\w?/)) {
+        if (/^(\*|!\w*)/) {
           push @record, [ $id, $hop, $ip, undef, $_ ];
           next TOKEN;
         }

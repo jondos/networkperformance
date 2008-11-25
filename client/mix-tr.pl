@@ -69,7 +69,6 @@ sub connect {
   die("could not connect to database: $! ") unless($dbh);
   # prepare queries
   $q{'insert_run'} = $dbh->prepare('INSERT INTO run VALUES(NULL,NOW(),?,?)');
-  $q{'insert_hop'} = $dbh->prepare('INSERT INTO hop VALUES(?,?,?,?,?)');
   $q{'update_session'} = $dbh->prepare('UPDATE scriptrun SET stoptime=NOW() WHERE id=?');
   # get session id
   $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,NOW(),NOW())',config::get('source'),config::get('target'));
@@ -187,7 +186,7 @@ sub make_run {
 config::init($ARGV[0]);
 db::connect(config::get_db_config());
 while(! $quit) {
-  make_run($_) foreach(@targets);
+  make_run();
   db::update_session();
   # sleeping
   SLEEP: for (0..config::get('sleep')) {

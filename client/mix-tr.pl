@@ -89,19 +89,13 @@ sub update_session {
 }
 
 sub commit_data {
-  $dbh->begin_work;
   # get ID for this run
   $q{'insert_run'}->execute($session_id);
   my $id = $dbh->last_insert_id;
-  unless($id) {
-    $dbh->rollback;
-    return;
-  }
+  return unless($id);
   # submit all records as a bulk-query (faster!)
   $dbh->do('INSERT INTO hop VALUES '.
-            join(',',map{"($session_id,".join(',',map{$dbh->quote($_)} @$_).')'} @_));
-  # finish
-  $dbh->commit;
+            join(',',map{"($id,".join(',',map{$dbh->quote($_)} @$_).')'} @_));
 }
 
 }

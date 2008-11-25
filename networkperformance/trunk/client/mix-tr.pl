@@ -98,14 +98,8 @@ sub commit_data {
     return;
   }
   # submit all records as a bulk-query (faster!)
-  my $sql = 'INSERT INTO hop VALUES ';
-  my $insert = '';
-  foreach my $record (@_) {
-    $sql .= $insert.'('.join(',',map{$dbh->quote($_)} ($session_id,@$record)).')';
-    $insert = ',';
-  }
-  # fire!
-  $dbh->do($sql);
+  $dbh->do('INSERT INTO hop VALUES '.
+            join(',',map{"($session_id,".join(',',map{$dbh->quote($_)} @$_).')'} @_));
   # finish
   $dbh->commit;
 }

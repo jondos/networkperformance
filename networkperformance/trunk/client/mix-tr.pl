@@ -67,12 +67,12 @@ sub connect {
   # connect to database
   $dbh = DBI->connect("DBI:mysql:dbname=$db_name:$db_host",$username,$password);
   die("could not connect to database: $! ") unless($dbh);
-  # prepare queries
-  $q{'insert_run'} = $dbh->prepare('INSERT INTO run VALUES(NULL,NOW(),?,?)');
-  $q{'update_session'} = $dbh->prepare('UPDATE scriptrun SET stoptime=NOW() WHERE id=?');
   # get session id
   $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,NOW(),NOW())',undef,config::get('source'),config::get('target'));
   $session_id = $dbh->last_insert_id;
+  # prepare queries
+  $q{'insert_run'} = $dbh->prepare('INSERT INTO run VALUES(NULL,NOW(),?,?)');
+  $q{'update_session'} = $dbh->prepare('UPDATE scriptrun SET stoptime=NOW() WHERE id=?');
 }
 
 sub done {
@@ -111,14 +111,12 @@ $SIG{'TERM'} = $SIG{'INT'} = sub{
 };
 
 sub make_run {
-  my $cmd = config::get('command');
-  my $host = config::get('target');
-  my $queries = config::get('queries');
+  my ($host,$cmd) = @_;
   my @record;
 
   print $host,'..';
   # run and parse traceroute
-  unless(open(CMD,sprintf($cmd,$queries,$host).' |')) {
+  unless(open(CMD,"$cmd |")) {
     warn("could not run $cmd: $!");
     return;
   }
@@ -172,11 +170,18 @@ sub make_run {
 
 config::init($ARGV[0]);
 db::connect(config::get_db_config());
+
+my $cmd = config::get('command');
+my $host = config::get('target');
+my $queries = config::get('queries');
+$cmd = sprintf($cmd,$queries,$host);
+my $sleep = config::get('sleep');
+
 while(! $quit) {
-  make_run();
+  make_run($host,$cmd);
   db::update_session();
   # sleeping
-  SLEEP: for (0..config::get('sleep')) {
+  SLEEP: for (0..$sleep) {
     last SLEEP if($quit);
     sleep(1);
   }

@@ -23,8 +23,8 @@ sub usage {
 
 sub init {
   my ($filename) = @_;
-  usage() unless(-f $filename && -s $filename);
-  open(CONF,"< $filename") || die("reading config file $filename: $!")
+  usage() unless(defined $filename && -f $filename && -s $filename);
+  open(CONF,"< $filename") || die("reading config file $filename: $!");
   while(<CONF>) {
     # trim white spaces and comments
     s/^\s+|\s+$//sg;
@@ -65,7 +65,7 @@ my %q;
 sub connect {
   my ($db_name,$db_host,$username,$password) = @_;
   # connect to database
-  $dbh = DBI->connect("DBI:mysql:dbname=$db_name:$db_host",$username,$password,$dbargs);
+  $dbh = DBI->connect("DBI:mysql:dbname=$db_name:$db_host",$username,$password);
   die("could not connect to database: $! ") unless($dbh);
   # prepare queries
   $q{'insert_run'} = $dbh->prepare('INSERT INTO run VALUES(NULL,NOW(),?,?)');
@@ -75,9 +75,9 @@ sub connect {
   $session_id = $dbh->last_insert_id;
 }
 
-sub close {
+sub done {
   # finish prepared queries
-  foreach (keys $q) {
+  foreach (keys %q) {
     $q{$_}->finish();
   }
   # disconnect from DB
@@ -91,7 +91,7 @@ sub update_session {
 sub commit_data {
   $dbh->begin_work;
   # get ID for this run
-  $q{'insert_run'}->execute($host,$queries);
+  $q{'insert_run'}->execute($session_id);
   my $id = $dbh->last_insert_id;
   unless($id) {
     $dbh->rollback;
@@ -101,7 +101,7 @@ sub commit_data {
   my $sql = 'INSERT INTO hop VALUES ';
   my $insert = '';
   foreach my $record (@_) {
-    $sql .= $insert.'(',join(',',map($dbh->quote($_),@$record)),')';
+    $sql .= $insert.'('.join(',',map{$dbh->quote($_)} ($session_id,@$record)).')';
     $insert = ',';
   }
   # fire!
@@ -123,14 +123,13 @@ $SIG{'TERM'} = $SIG{'INT'} = sub{
 };
 
 sub make_run {
-  my ($host) = @_;
-  return unless($host);
-  print $host,'..';
-  my @record;
-  # run and parse traceroute
   my $cmd = config::get('command');
   my $host = config::get('target');
-  my $queris = config::get('queries');
+  my $queries = config::get('queries');
+  my @record;
+
+  print $host,'..';
+  # run and parse traceroute
   unless(open(CMD,sprintf($cmd,$queries,$host).' |')) {
     warn("could not run $cmd: $!");
     return;
@@ -149,12 +148,12 @@ sub make_run {
       TOKEN: foreach (split(/\s+/,$data)) {
         # store record, if found a timeout ('*') or error message
         if (/^(\*|!\w*)/) {
-          push @record, [ $id, $hop, $ip, undef, $_ ];
+          push @record, [ $hop, $ip, undef, $_ ];
           next TOKEN;
         }
         # store record, if found a time in 'ms'
         if ($_ eq 'ms') {
-          push @record, [ $id, $hop, $ip, $ms , undef ];
+          push @record, [ $hop, $ip, $ms , undef ];
           next TOKEN;
         }
         # found floating value, store for later usage of 'ms'
@@ -194,6 +193,6 @@ while(! $quit) {
     sleep(1);
   }
 }
-db::close();
+db::done();
 
 # vim: et foldmethod=marker foldenable foldlevel=0 lbr ai nu fdc=1

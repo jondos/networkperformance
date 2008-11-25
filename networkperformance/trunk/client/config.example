@@ -1,0 +1,39 @@
+# config file
+#
+# syntax:  
+# "key"<whitespaces>"value"
+#
+# empty lines, or those starting with a #-sign are considered
+# comments
+
+# this host shall be targeted
+target LOCALHOST
+
+# this is the host, the script is running on
+source LOCALHOST
+
+#
+# general configuration (default values)
+#
+# number of seconds between two consecutive runs of traceroute
+#sleep 60
+#
+# number of probes per hop 
+#queries 3
+
+#
+# command to be executed as traceroute
+# takes two parameters:
+# 1st: integer (number of hops)
+# 2nd: target
+#command traceroute -T -p 80 -n -q %d %s 2>/dev/null
+
+
+#
+# parameters for database access
+#
+db_username  YOUR_USERNAME_HERE
+db_password  YOUR_PASSWORD_HERE
+db_host      127.0.0.1
+#db_host     195.2.228.160
+db_name      mixlog

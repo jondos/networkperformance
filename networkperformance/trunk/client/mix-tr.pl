@@ -2,76 +2,118 @@
 use warnings;
 use diagnostics;
 use strict;
-use Getopt::Long;
-use DBI;
-
-my $DB_FILE_NAME = 'dbfile';
-my $CMD = 'traceroute -n -q %d %s 2>/dev/null';
 
 $|=1;
 
-#--------------------------------------------------- PRELUDE
+#--------------------------------------------------- CONFIG
+#{{{
+{
+package config;
+
+my %vars = ( 'sleep' => 60,
+             'queries' => 3,
+             'command' => 'traceroute -T -p 80 -n -q %d %s 2>/dev/null',
+             'target' => undef,
+             'source' => 'localhost');
+
 sub usage {
-  print "$0 [-s <sleep seconds>] -t <target> [-t...] ...\n";
+  print "$0 <config-file>\n";
   exit(0);
 }
 
-my ($sleep_interval,$queries,$help_me) = (60,3,0);
-my @targets;
+sub init {
+  my ($filename) = @_;
+  usage() unless(-f $filename && -s $filename);
+  open(CONF,"< $filename") || die("reading config file $filename: $!")
+  while(<CONF>) {
+    # trim white spaces and comments
+    s/^\s+|\s+$//sg;
+    s/^#.*//;
+    # parse value
+    if (/^(\S+)\s+(.*)/) {
+      $vars{$1} = $2;
+    }
+  }
+  close(CONF);
+}
 
-GetOptions( 'target|t=s@' => \@targets, 
-            'sleep|s=i'  => \$sleep_interval,
-            'queries|q=i'  => \$queries,
-            'help|usage|h|u' => \$help_me);
-usage() if($help_me || (!scalar(@targets)));
+sub get_db_config {
+  return @vars{"db_name","db_host","db_username","db_password"};
+}
+
+sub get {
+  my ($key,$default) = @_;
+  return $vars{$key} if(defined $vars{$key});
+  return $default;
+}
+
+}
+
+#}}}
 
 #------------------------------------------------- DB
+#{{{
 
-my $dbargs = {'AutoCommit' => 1,
-              'PrintError' => 1};
+{
+package db;
+use DBI;
+
 my $dbh;
-my ($q_insert_run,$q_max_run_id,$q_insert_hop);
+my $session_id;
+my %q;
 
-sub db_table {
-  my ($name,$create) = @_;
-  # try to check if table exists
-  my $q;
-  {
-    local $SIG{'__WARN__'}=sub{};
-    $q = $dbh->prepare("SELECT * FROM $name LIMIT 1");
-  }
-  if ($dbh->err()) {
-    $dbh->do("CREATE TABLE $name ($create)");
-    die($dbh->errstr()) if ($dbh->err());
-  }
-  $q->finish() if($q);
-}
-
-sub db_connect {
-  # check for existence of SQLite-DB
-  my @driver_names = DBI->available_drivers();
-  my $found = 0;
-  foreach(@driver_names){
-    $found = 1 if (/sqlite/i);
-  }
-  die("did not find support for SQLite\n") unless($found);
+sub connect {
+  my ($db_name,$db_host,$username,$password) = @_;
   # connect to database
-  $dbh = DBI->connect("dbi:SQLite:dbname=$DB_FILE_NAME",'','',$dbargs);
+  $dbh = DBI->connect("DBI:mysql:dbname=$db_name:$db_host",$username,$password,$dbargs);
   die("could not connect to database: $! ") unless($dbh);
-  # create tables, if not existing
-  db_table('run','id INTEGER PRIMARY KEY,timestamp DATE,host TEXT,queries INTEGER');
-  db_table('hop','run INTEGER,n INTEGER,ip TEXT,ms FLOAT,error TEXT');
-  # queries
-  $q_insert_run = $dbh->prepare('INSERT INTO run VALUES(NULL,DATETIME(\'now\'),?,?)');
-  $q_max_run_id = $dbh->prepare('SELECT max(id) FROM run');
-  $q_insert_hop = $dbh->prepare('INSERT INTO hop VALUES(?,?,?,?,?)');
+  # prepare queries
+  $q{'insert_run'} = $dbh->prepare('INSERT INTO run VALUES(NULL,NOW(),?,?)');
+  $q{'insert_hop'} = $dbh->prepare('INSERT INTO hop VALUES(?,?,?,?,?)');
+  $q{'update_session'} = $dbh->prepare('UPDATE scriptrun SET stoptime=NOW() WHERE id=?');
+  # get session id
+  $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,NOW(),NOW())',config::get('source'),config::get('target'));
+  $session_id = $dbh->last_insert_id;
 }
 
-sub db_close {
-  $q_insert_run->finish();
-  $q_insert_hop->finish();
+sub close {
+  # finish prepared queries
+  foreach (keys $q) {
+    $q{$_}->finish();
+  }
+  # disconnect from DB
   $dbh->disconnect();
 }
+
+sub update_session {
+  $q{'update_session'}->execute($session_id);
+}
+
+sub commit_data {
+  $dbh->begin_work;
+  # get ID for this run
+  $q{'insert_run'}->execute($host,$queries);
+  my $id = $dbh->last_insert_id;
+  unless($id) {
+    $dbh->rollback;
+    return;
+  }
+  # submit all records as a bulk-query (faster!)
+  my $sql = 'INSERT INTO hop VALUES ';
+  my $insert = '';
+  foreach my $record (@_) {
+    $sql .= $insert.'(',join(',',map($dbh->quote($_),@$record)),')';
+    $insert = ',';
+  }
+  # fire!
+  $dbh->do($sql);
+  # finish
+  $dbh->commit;
+}
+
+}
+
+#}}}
 
 #------------------------------------------------- route
 
@@ -85,18 +127,13 @@ sub make_run {
   my ($host) = @_;
   return unless($host);
   print $host,'..';
-  # create new record in 'run'-table
-  $q_insert_run->execute($host,$queries);
-  $q_max_run_id->execute();
-  my ($id) = $q_max_run_id->fetchrow_array();
-  $q_max_run_id->finish();
-  unless($id) {
-    warn("could not create new record for host $host");
-    return; 
-  }
+  my @record;
   # run and parse traceroute
-  unless(open(CMD,sprintf($CMD,$queries,$host).' |')) {
-    warn("could not run tcpdump: $!");
+  my $cmd = config::get('command');
+  my $host = config::get('target');
+  my $queris = config::get('queries');
+  unless(open(CMD,sprintf($cmd,$queries,$host).' |')) {
+    warn("could not run $cmd: $!");
     return;
   }
   PARSE: while(<CMD>) {
@@ -111,14 +148,17 @@ sub make_run {
       # parse lines
       my ($ip,$ms);
       TOKEN: foreach (split(/\s+/,$data)) {
-        # ignore '*'
-        next TOKEN if($_ eq '*');
-        # store record, if found a time in 'ms'
-        if ($_ eq 'ms') {
-          $q_insert_hop->execute($id,$hop,$ip,$ms,undef);
+        # store record, if found a timeout ('*') or error message
+        if (($_ eq '*')||(/^!\w?/)) {
+          push @record, [ $id, $hop, $ip, undef, $_ ];
           next TOKEN;
         }
-        # found value of 'ms'
+        # store record, if found a time in 'ms'
+        if ($_ eq 'ms') {
+          push @record, [ $id, $hop, $ip, $ms , undef ];
+          next TOKEN;
+        }
+        # found floating value, store for later usage of 'ms'
         if (/^\d+\.\d+$/) {
           $ms=$_;
           next TOKEN;
@@ -126,10 +166,6 @@ sub make_run {
         # found IP
         if (/^\d+\.\d+\.\d+\.\d+$/) {
           $ip=$_;
-          next TOKEN;
-        }
-        if (/^!\w?/) {
-          $q_insert_hop->execute($id,$hop,$ip,undef,$_);
           next TOKEN;
         }
         # some other token... ignore
@@ -140,20 +176,25 @@ sub make_run {
   }
   # close external program
   close(CMD);
+  # push data to DB
+  db::commit_data(@record);
+  # finish
   print "done\n";
 }
 
 #------------------------------------------------- main
 
-db_connect();
+config::init($ARGV[0]);
+db::connect(config::get_db_config());
 while(! $quit) {
   make_run($_) foreach(@targets);
+  db::update_session();
   # sleeping
-  SLEEP: for (0..$sleep_interval) {
+  SLEEP: for (0..config::get('sleep')) {
     last SLEEP if($quit);
     sleep(1);
   }
 }
-db_close();
+db::close();
 
-# vim: et
+# vim: et foldmethod=marker foldenable foldlevel=0 lbr ai nu fdc=1

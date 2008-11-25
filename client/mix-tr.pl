@@ -71,7 +71,7 @@ sub connect {
   $q{'insert_run'} = $dbh->prepare('INSERT INTO run VALUES(NULL,NOW(),?,?)');
   $q{'update_session'} = $dbh->prepare('UPDATE scriptrun SET stoptime=NOW() WHERE id=?');
   # get session id
-  $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,NOW(),NOW())',config::get('source'),config::get('target'));
+  $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,NOW(),NOW())',undef,config::get('source'),config::get('target'));
   $session_id = $dbh->last_insert_id;
 }
 

@@ -68,11 +68,11 @@ sub connect {
   $dbh = DBI->connect("DBI:mysql:dbname=$db_name:$db_host",$username,$password);
   die("could not connect to database: $! ") unless($dbh);
   # get session id
-  $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,NOW(),NOW())',undef,config::get('source'),config::get('target'));
+  $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,UNIX_TIMESTAMP(NOW()),UNIX_TIMESTAMP(NOW()),NOW(),NOW())',undef,config::get('source'),config::get('target'));
   $session_id = $dbh->last_insert_id;
   # prepare queries
-  $q{'insert_run'} = $dbh->prepare('INSERT INTO run VALUES(NULL,NOW(),?,?)');
-  $q{'update_session'} = $dbh->prepare('UPDATE scriptrun SET stoptime=NOW() WHERE id=?');
+  $q{'insert_run'} = $dbh->prepare('INSERT INTO trrun VALUES(NULL,?,UNIX_TIMESTAMP(NOW()),NOW())');
+  $q{'update_session'} = $dbh->prepare('UPDATE scriptrun SET timeunixstop=UNIX_TIMESTAMP(NOW()),timehumanstop=NOW() WHERE id=?');
 }
 
 sub done {
@@ -94,8 +94,8 @@ sub commit_data {
   my $id = $dbh->last_insert_id;
   return unless($id);
   # submit all records as a bulk-query (faster!)
-  $dbh->do('INSERT INTO hop VALUES '.
-            join(',',map{"($id,".join(',',map{$dbh->quote($_)} @$_).')'} @_));
+  $dbh->do('INSERT INTO trrunhop VALUES '.
+            join(',',map{"(NULL,$id,".join(',',map{$dbh->quote($_)} @$_).')'} @_));
 }
 
 }
@@ -130,16 +130,18 @@ sub make_run {
       my ($hop,$data) = ($1,$2);
       print $hop,'..';
       # parse lines
-      my ($ip,$ms);
+      my ($ip,$ms,$probe);
       TOKEN: foreach (split(/\s+/,$data)) {
         # store record, if found a timeout ('*') or error message
         if (/^(\*|!\w*)/) {
-          push @record, [ $hop, $ip, undef, $_ ];
+          push @record, [ $hop, $ip, $probe, undef, $_ ];
+          ++$probe;
           next TOKEN;
         }
         # store record, if found a time in 'ms'
         if ($_ eq 'ms') {
-          push @record, [ $hop, $ip, $ms , undef ];
+          push @record, [ $hop, $ip, $probe, $ms , undef ];
+          ++$probe;
           next TOKEN;
         }
         # found floating value, store for later usage of 'ms'

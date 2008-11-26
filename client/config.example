@@ -36,4 +36,4 @@ db_username  YOUR_USERNAME_HERE
 db_password  YOUR_PASSWORD_HERE
 db_host      127.0.0.1
 #db_host     195.2.228.160
-db_name      mixlog
+db_name      tcpnetlog

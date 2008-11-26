@@ -62,14 +62,14 @@ my $dbh;
 my $session_id;
 my %q;
 
-sub connect {
+sub init {
   my ($db_name,$db_host,$username,$password) = @_;
   # connect to database
   $dbh = DBI->connect("DBI:mysql:dbname=$db_name:$db_host",$username,$password);
   die("could not connect to database: $! ") unless($dbh);
   # get session id
   $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,UNIX_TIMESTAMP(NOW()),UNIX_TIMESTAMP(NOW()),NOW(),NOW())',undef,config::get('source'),config::get('target'));
-  $session_id = $dbh->last_insert_id;
+  $session_id = $dbh->last_insert_id(undef,undef,qw( scriptrun id ));
   # prepare queries
   $q{'insert_run'} = $dbh->prepare('INSERT INTO trrun VALUES(NULL,?,UNIX_TIMESTAMP(NOW()),NOW())');
   $q{'update_session'} = $dbh->prepare('UPDATE scriptrun SET timeunixstop=UNIX_TIMESTAMP(NOW()),timehumanstop=NOW() WHERE id=?');
@@ -89,9 +89,10 @@ sub update_session {
 }
 
 sub commit_data {
+  return unless(scalar(@_));
   # get ID for this run
   $q{'insert_run'}->execute($session_id);
-  my $id = $dbh->last_insert_id;
+  my $id = $dbh->last_insert_id(undef,undef,qw( trrun id ));
   return unless($id);
   # submit all records as a bulk-query (faster!)
   $dbh->do('INSERT INTO trrunhop VALUES '.
@@ -134,14 +135,14 @@ sub make_run {
       TOKEN: foreach (split(/\s+/,$data)) {
         # store record, if found a timeout ('*') or error message
         if (/^(\*|!\w*)/) {
-          push @record, [ $hop, $ip, $probe, undef, $_ ];
           ++$probe;
+          push @record, [ $hop, $ip, $probe, undef, $_ ];
           next TOKEN;
         }
         # store record, if found a time in 'ms'
         if ($_ eq 'ms') {
-          push @record, [ $hop, $ip, $probe, $ms , undef ];
           ++$probe;
+          push @record, [ $hop, $ip, $probe, $ms , undef ];
           next TOKEN;
         }
         # found floating value, store for later usage of 'ms'
@@ -171,7 +172,7 @@ sub make_run {
 #------------------------------------------------- main
 
 config::init($ARGV[0]);
-db::connect(config::get_db_config());
+db::init(config::get_db_config());
 
 my $cmd = config::get('command');
 my $host = config::get('target');

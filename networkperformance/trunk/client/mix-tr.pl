@@ -68,7 +68,8 @@ sub init {
   $dbh = DBI->connect("DBI:mysql:dbname=$db_name:$db_host",$username,$password);
   die("could not connect to database: $! ") unless($dbh);
   # get session id
-  $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,UNIX_TIMESTAMP(NOW()),UNIX_TIMESTAMP(NOW()),NOW(),NOW())',undef,config::get('source'),config::get('target'));
+  $dbh->do('INSERT INTO scriptrun VALUES(NULL,?,?,UNIX_TIMESTAMP(NOW()),UNIX_TIMESTAMP(NOW()),NOW(),NOW(),?,?,?)',undef,
+                       config::get('source'),config::get('target'),config::get('command'),config::get('sleep'),config::get('queries'));
   $session_id = $dbh->last_insert_id(undef,undef,qw( scriptrun id ));
   # prepare queries
   $q{'insert_run'} = $dbh->prepare('INSERT INTO trrun VALUES(NULL,?,UNIX_TIMESTAMP(NOW()),NOW())');
